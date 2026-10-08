@@ -876,6 +876,11 @@ function bind(){
 const SB_URL='https://tpgcoxkrefjcznqknufa.supabase.co';      // ex.: https://abcdxyz.supabase.co
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwZ2NveGtyZWZqY3pucWtudWZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0NzM4NzcsImV4cCI6MjEwNzA0OTg3N30.2IAd1GxJv3E1ZUJF748Lurx6ciraVS1ylFwQ2VqwZ3A';       // Project Settings > API > anon public (nunca use a service_role)
 /* ============================================================ */
+/* Links de convite / redefinição chegam como #access_token=...&type=invite|recovery (ou #error=...) */
+const _h=new URLSearchParams((location.hash||'').slice(1));
+let SETPW=['invite','recovery'].includes(_h.get('type'));
+const AUTH_ERR=_h.get('error_description')||'';
+if(AUTH_ERR)history.replaceState(null,'',location.pathname+location.search);
 const sb=window.supabase&&SB_URL.startsWith('https://')?window.supabase.createClient(SB_URL,SB_KEY):null;
 let EMP=null;
 function wrapErr(e){if(!e)return e;const x=new Error(e.message||'erro');x.code=(e.code==='42501'||e.status===403||e.status===401)?'invalid_argument':(e.code||'erro');return x}
@@ -908,14 +913,29 @@ const mkDL=()=>({save:async({filename,data})=>{const a=document.createElement('a
 
 function gate(html){let g=document.getElementById('gate');if(!g){g=document.createElement('div');g.id='gate';g.style.cssText='position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px';document.body.appendChild(g)}g.innerHTML='<div class="panel" style="width:100%;max-width:380px;display:flex;flex-direction:column;gap:12px">'+html+'</div>';return g}
 function loginUI(msg){
-  const g=gate('<h2>Mesa Financeira</h2><label class="f">E-mail<input id="lg-em" type="email" autocomplete="username"></label><label class="f">Senha<input id="lg-pw" type="password" autocomplete="current-password"></label><p class="note" id="lg-err" style="color:var(--out)">'+(msg||'')+'</p><button type="button" class="pri" id="lg-ok">Entrar</button>');
+  const g=gate('<h2>Mesa Financeira</h2><label class="f">E-mail<input id="lg-em" type="email" autocomplete="username"></label><label class="f">Senha<input id="lg-pw" type="password" autocomplete="current-password"></label><p class="note" id="lg-err" style="color:var(--out)">'+(msg||'')+'</p><button type="button" class="pri" id="lg-ok">Entrar</button><button type="button" id="lg-fg">Esqueci minha senha</button>');
   const go=async()=>{const r=await sb.auth.signInWithPassword({email:g.querySelector('#lg-em').value.trim(),password:g.querySelector('#lg-pw').value});if(r.error){g.querySelector('#lg-err').textContent='E-mail ou senha inválidos.';return}start()};
+  g.querySelector('#lg-fg').addEventListener('click',async()=>{const em=g.querySelector('#lg-em').value.trim(),er=g.querySelector('#lg-err');if(!em){er.style.color='var(--out)';er.textContent='Digite seu e-mail acima.';return}const r=await sb.auth.resetPasswordForEmail(em,{redirectTo:location.origin+location.pathname});er.style.color=r.error?'var(--out)':'';er.textContent=r.error?'Não foi possível enviar agora. Tente de novo em instantes.':'Se o e-mail estiver cadastrado, você receberá um link para criar uma nova senha.'});
   g.querySelector('#lg-ok').addEventListener('click',go);g.querySelector('#lg-pw').addEventListener('keydown',e=>{if(e.key==='Enter')go()});
+}
+function setPwUI(){
+  const g=gate('<h2>Defina sua senha</h2><p class="note">Escolha a senha que você vai usar para entrar nas próximas vezes.</p><label class="f">Nova senha<input id="np-1" type="password" autocomplete="new-password"></label><label class="f">Repita a senha<input id="np-2" type="password" autocomplete="new-password"></label><p class="note" id="np-err" style="color:var(--out)"></p><button type="button" class="pri" id="np-ok">Salvar e entrar</button>');
+  const go=async()=>{
+    const a=g.querySelector('#np-1').value,b=g.querySelector('#np-2').value,er=g.querySelector('#np-err');
+    if(a.length<8){er.textContent='Use pelo menos 8 caracteres.';return}
+    if(a!==b){er.textContent='As senhas não conferem.';return}
+    const r=await sb.auth.updateUser({password:a,data:{senha_definida:true}});
+    if(r.error){er.textContent='Não foi possível salvar a senha. Tente de novo ou peça um novo convite.';return}
+    SETPW=false;history.replaceState(null,'',location.pathname+location.search);start();
+  };
+  g.querySelector('#np-ok').addEventListener('click',go);g.querySelector('#np-2').addEventListener('keydown',e=>{if(e.key==='Enter')go()});
 }
 function pickEmp(ms){return new Promise(res=>{const g=gate('<h2>Escolha a empresa</h2>'+ms.map((m,i)=>'<button type="button" data-i="'+i+'">'+esc(m.empresas.nome)+'</button>').join(''));g.addEventListener('click',e=>{const b=e.target.closest('button[data-i]');if(b){g.remove();res(ms[+b.dataset.i])}})})}
 async function start(){
   const ses=(await sb.auth.getSession()).data.session;
-  if(!ses){loginUI();return}
+  if(!ses){loginUI(AUTH_ERR?'Este link expirou ou já foi usado. Peça um novo convite ou use "Esqueci minha senha".':'');return}
+  const u=ses.user;
+  if(SETPW||(u.invited_at&&!(u.user_metadata&&u.user_metadata.senha_definida))){setPwUI();return}
   const r=await sb.from('membros').select('empresa_id,papel,empresas(nome)').eq('usuario_id',ses.user.id);
   const ms=r.data||[];
   if(!ms.length){gate('<h2>Sem acesso</h2><p class="note">Seu usuário ainda não foi vinculado a uma empresa. Peça ao responsável pelo sistema.</p><button type="button" id="lg-out">Sair</button>').querySelector('#lg-out').addEventListener('click',async()=>{await sb.auth.signOut();loginUI()});return}

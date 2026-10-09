@@ -2,5 +2,5 @@
 // Use a chave "anon public" (começa com eyJ...). Nunca use a service_role.
 window.MESA_CONFIG={
   url:'https://tpgcoxkrefjcznqknufa.supabase.co',
-key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rY2Ryanh5anV3aHZsa2Z3bG10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0NTEwMDQsImV4cCI6MjEwNzAyNzAwNH0.jYlGcnRl_bTQ8wSAlfyPrckRzgunoNGRbR5DAclIp64'
+key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwZ2NveGtyZWZqY3pucWtudWZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0NzM4NzcsImV4cCI6MjEwNzA0OTg3N30.2IAd1GxJv3E1ZUJF748Lurx6ciraVS1ylFwQ2VqwZ3A'
 };

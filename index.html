@@ -881,6 +881,17 @@ let NEEDPW=/type=(invite|recovery)/.test(H0);
 const LINKERR=/error_code=|error=access_denied/.test(H0);
 const sb=window.supabase&&SB_URL.startsWith('https://')?window.supabase.createClient(SB_URL,SB_KEY):null;
 let EMP=null;
+function cfgProblem(){
+  try{
+    if(!SB_KEY||SB_KEY.indexOf('COLE_AQUI')>=0)return 'A chave (key) do config.js ainda não foi preenchida.';
+    if(!/^https:\/\/[a-z0-9]+\.supabase\.co\/?$/.test(SB_URL))return 'A URL do config.js está fora do formato https://CODIGO.supabase.co';
+    const p=JSON.parse(atob(SB_KEY.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    const host=SB_URL.replace('https://','').split('.')[0];
+    if(p.role!=='anon')return 'A chave do config.js não é a "anon public" (papel: '+p.role+').';
+    if(p.ref&&p.ref!==host)return 'A URL e a chave do config.js são de projetos diferentes. A chave é do projeto '+p.ref+' e a URL é do projeto '+host+'.';
+  }catch(e){return 'A chave do config.js parece incompleta ou com caracteres a mais.'}
+  return '';
+}
 function wrapErr(e){if(!e)return e;const x=new Error(e.message||'erro');x.code=(e.code==='42501'||e.status===403||e.status===401)?'invalid_argument':(e.code||'erro');return x}
 async function chk(p){const r=await p;if(r.error)throw wrapErr(r.error);return r}
 function mkDB(emp){
@@ -913,7 +924,7 @@ function gate(html){let g=document.getElementById('gate');if(!g){g=document.crea
 function loginUI(msg){
   const g=gate('<h2>Mesa Financeira</h2><label class="f">E-mail<input id="lg-em" type="email" autocomplete="username"></label><label class="f">Senha<input id="lg-pw" type="password" autocomplete="current-password"></label><p class="note" id="lg-err" style="color:var(--out)">'+(msg||'')+'</p><button type="button" class="pri" id="lg-ok">Entrar</button><button type="button" id="lg-forgot">Esqueci minha senha</button>');
   const err=t=>{g.querySelector('#lg-err').textContent=t};
-  const go=async()=>{const r=await sb.auth.signInWithPassword({email:g.querySelector('#lg-em').value.trim(),password:g.querySelector('#lg-pw').value});if(r.error){err('E-mail ou senha inválidos.');return}start()};
+  const go=async()=>{const r=await sb.auth.signInWithPassword({email:g.querySelector('#lg-em').value.trim(),password:g.querySelector('#lg-pw').value});if(r.error){const m=(r.error.message||'').toLowerCase();err(m.indexOf('invalid login')>=0?'E-mail ou senha incorretos, ou este usuário não existe neste projeto do Supabase.':m.indexOf('not confirmed')>=0?'E-mail ainda não confirmado. No Supabase, confirme o usuário (Authentication > Users).':m.indexOf('api key')>=0?'Chave do Supabase inválida. Confira o config.js.':'Não foi possível entrar: '+r.error.message);return}start()};
   g.querySelector('#lg-ok').addEventListener('click',go);g.querySelector('#lg-pw').addEventListener('keydown',e=>{if(e.key==='Enter')go()});
   g.querySelector('#lg-forgot').addEventListener('click',async()=>{const em=g.querySelector('#lg-em').value.trim();if(!em){err('Digite seu e-mail acima e toque de novo.');return}const r=await sb.auth.resetPasswordForEmail(em,{redirectTo:location.origin+location.pathname});if(r.error){err('Não foi possível enviar agora. Tente em alguns minutos.');return}err('');g.querySelector('#lg-err').style.color='var(--in)';g.querySelector('#lg-err').textContent='Se esse e-mail estiver cadastrado, você receberá um link para criar uma nova senha.'});
 }
@@ -944,6 +955,8 @@ async function boot(){
   const h=(location.hash||'').slice(1);
   setTab(['fluxo','pagar','receber','dfc','dre','ajustes'].includes(h)?h:'fluxo',false);
   document.addEventListener('click',async e=>{const a=e.target.closest('a[data-anexo]');if(!a)return;e.preventDefault();const r=await sb.storage.from('anexos').createSignedUrl(a.dataset.anexo,120);if(r.data)window.open(r.data.signedUrl,'_blank','noopener');else toast('Não foi possível abrir o anexo.')});
+  const cp=cfgProblem();
+  if(cp){render();gate('<h2>Configuração incorreta</h2><p class="note">'+esc(cp)+'</p><p class="note">Corrija o arquivo config.js no GitHub, salve e aguarde 1 a 2 minutos.</p>');return}
   if(!sb){render();gate('<h2>Configuração pendente</h2><p class="note">Preencha a URL e a chave no arquivo config.js, na mesma pasta do index.html.</p>');return}
   start();
 }

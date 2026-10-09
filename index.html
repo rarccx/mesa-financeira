@@ -1,5 +1,6 @@
 <title>Mesa Financeira</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:wght@600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <style>
@@ -635,7 +636,7 @@ function renderAjustes(){
    '<div class="panel"><h2>Centros de custo</h2><div class="chips">'+centros().map((c,i)=>'<span class="chip c-info">'+esc(c)+(CAN?'<button type="button" data-rm-cc="'+i+'" aria-label="Remover '+esc(c)+'">×</button>':'')+'</span>').join('')+'</div><div class="g2"><label class="f">Novo centro<input type="text" id="aj-cc" placeholder="Ex.: Loja 2"></label><div style="align-self:end"><button type="button" id="aj-cc-s"'+can+'>Adicionar</button></div></div></div>'+
    '<div class="panel"><h2>Categorias próprias</h2><p class="note">As categorias padrão já cobrem o varejo. Crie outras e escolha onde entram no resultado.</p>'+((CFG.cats||[]).length?'<div class="chips">'+CFG.cats.map((c,i)=>'<span class="chip c-info">'+esc(c.nome)+' · '+GRUPOS[c.g]+(CAN?'<button type="button" data-rm-cat="'+i+'" aria-label="Remover '+esc(c.nome)+'">×</button>':'')+'</span>').join('')+'</div>':'')+
    '<div class="g2"><label class="f">Nome<input type="text" id="aj-cat"></label><label class="f">Entra no resultado como<select id="aj-catg">'+Object.keys(GRUPOS).map(g=>'<option value="'+g+'">'+GRUPOS[g]+'</option>').join('')+'</select></label></div><div><button type="button" id="aj-cat-s"'+can+'>Adicionar categoria</button></div></div>'+
-   '<div class="panel"><h2>Dados</h2><div class="bar-a">'+(DL?'<button type="button" id="aj-csv">Exportar lançamentos (CSV)</button>':'')+(ex&&CAN?'<button type="button" class="neg" id="aj-ex">Remover dados de exemplo</button>':'')+'</div><p class="tag">'+LANC.length+' lançamentos e '+CONTAS.length+' contas guardados nesta página.</p></div>';
+   '<div class="panel"><h2>Dados</h2><div class="bar-a">'+(DL?'<button type="button" id="aj-xl">Exportar para Excel</button><button type="button" id="aj-xlm">Baixar planilha modelo</button>':'')+(CAN&&DB?'<button type="button" id="aj-xli">Importar do Excel</button><input type="file" id="aj-xlf" accept=".xlsx,.xls,.csv" style="display:none">':'')+(DL?'<button type="button" id="aj-csv">Exportar lançamentos (CSV)</button>':'')+(ex&&CAN?'<button type="button" class="neg" id="aj-ex">Remover dados de exemplo</button>':'')+'</div><p class="tag">'+LANC.length+' lançamentos e '+CONTAS.length+' contas guardados nesta página.</p></div>';
 }
 
 /* ---------- janela de formulários ---------- */
@@ -809,6 +810,155 @@ async function removeEx(){
   }catch(x){toast(errMsg(x));if(btn)btn.disabled=false}
 }
 
+/* ---------- Excel: exportar, modelo e importar ---------- */
+const XL_H=['Tipo','Parte','Descrição','Valor','Vencimento','Competência','Categoria','Centro de custo','Forma','Status','Pago em','Conta'];
+const xnorm=s=>String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
+const xdate=s=>{const [y,m,d]=s.split('-').map(Number);return Math.round(Date.UTC(y,m-1,d)/86400000)+25569};
+function xlSheet(aoa,widths,dateCols,moneyCols){
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=widths.map(w=>({wch:w}));
+  const rng=XLSX.utils.decode_range(ws['!ref']||'A1');
+  for(let r=1;r<=rng.e.r;r++){
+    (dateCols||[]).forEach(c=>{const x=ws[XLSX.utils.encode_cell({r,c})];if(x&&(x.t==='n'||x.t==='d'))x.z='dd/mm/yyyy'});
+    (moneyCols||[]).forEach(c=>{const x=ws[XLSX.utils.encode_cell({r,c})];if(x&&x.t==='n')x.z='#,##0.00'});
+  }
+  ws['!freeze']={xSplit:0,ySplit:1};
+  return ws;
+}
+function xlSave(wb,nome){
+  if(!DL){toast('Exportar não está disponível aqui.');return}
+  const buf=XLSX.write(wb,{type:'array',bookType:'xlsx'});
+  DL.save({filename:nome,data:buf}).catch(e=>{if(!e||e.code!=='declined')toast('Não foi possível exportar.')});
+}
+function xlExport(){
+  if(!window.XLSX){toast('A biblioteca do Excel não carregou. Recarregue a página.');return}
+  const rows=LANC.filter(l=>l.k!=='t').slice().sort((a,b)=>a.venc<b.venc?-1:a.venc>b.venc?1:0).map(l=>[
+    l.k==='r'?'Receber':'Pagar',l.pt||'',l.d||'',(l.v||0)/100,l.venc?xdate(l.venc):'',l.comp||'',catNome(l.cat),l.cc||'',FORMAS[l.forma]||'Não informada',l.st==='p'?(l.k==='r'?'Recebido':'Pago'):'Aberto',l.pago?xdate(l.pago):'',l.conta?contaNome(l.conta):'']);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,xlSheet([XL_H].concat(rows),[11,28,32,13,13,12,32,16,15,11,13,22],[4,10],[3]),'Lançamentos');
+  XLSX.utils.book_append_sheet(wb,xlSheet([['Nome','Tipo','Saldo inicial','Data do saldo']].concat(CONTAS.map(c=>[c.nome,c.tipo==='caixa'?'Caixa':'Banco',(c.saldo0||0)/100,c.data0?xdate(c.data0):''])),[28,10,14,14],[3],[2]),'Contas');
+  const tr=LANC.filter(l=>l.k==='t').map(l=>[l.venc?xdate(l.venc):'',contaNome(l.conta),contaNome(l.para),(l.v||0)/100]);
+  if(tr.length)XLSX.utils.book_append_sheet(wb,xlSheet([['Data','Origem','Destino','Valor']].concat(tr),[13,22,22,13],[0],[3]),'Transferências');
+  xlSave(wb,'mesa-financeira-'+TODAY+'.xlsx');
+}
+function xlModelo(){
+  if(!window.XLSX){toast('A biblioteca do Excel não carregou. Recarregue a página.');return}
+  const ex1=['Pagar','(exemplo) Fornecedor Silva','Compra de embalagens',350.5,xdate(TODAY),TODAY.slice(0,7),'Embalagens','Geral','Boleto','Aberto','',''];
+  const ex2=['Receber','(exemplo) Mercearia Central','Venda de mercadorias',1200,xdate(TODAY),TODAY.slice(0,7),'Vendas de mercadorias','Geral','PIX','Recebido',xdate(TODAY),CONTAS[0]?CONTAS[0].nome:'Caixa e bancos'];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,xlSheet([XL_H,ex1,ex2],[11,28,32,13,13,12,32,16,15,11,13,22],[4,10],[3]),'Lançamentos');
+  const ins=[['Como preencher'],[''],['Tipo','Receber (entrada) ou Pagar (saída).'],['Parte','Cliente ou fornecedor.'],['Valor','Sempre positivo. O Tipo diz se entra ou sai.'],['Vencimento','Data de vencimento, no formato dia/mês/ano.'],['Competência','Mês a que o lançamento pertence (mm/aaaa). Se ficar vazia, usa o mês do vencimento.'],['Categoria','Use um nome da aba Categorias. Nome desconhecido vai para "Outras receitas" ou "Outras despesas".'],['Status','Pago, Recebido ou Aberto. Pago e Recebido exigem a data de pagamento e a conta.'],['Pago em','Data em que o dinheiro entrou ou saiu.'],['Conta','Nome de uma conta já cadastrada (aba Contas).'],[''],['As linhas com "(exemplo)" na coluna Parte são ignoradas. Linhas que já existem na Mesa Financeira (mesmo tipo, parte, valor e vencimento) também são ignoradas.']];
+  const wi=XLSX.utils.aoa_to_sheet(ins);wi['!cols']=[{wch:14},{wch:100}];
+  XLSX.utils.book_append_sheet(wb,wi,'Instruções');
+  XLSX.utils.book_append_sheet(wb,xlSheet([['Categoria','Grupo']].concat(allCats().map(c=>[c.nome,GRUPOS[c.g]||c.g])),[38,34]),'Categorias');
+  XLSX.utils.book_append_sheet(wb,xlSheet([['Conta']].concat(CONTAS.map(c=>[c.nome])),[28]),'Contas');
+  xlSave(wb,'modelo-importacao-mesa-financeira.xlsx');
+}
+function xSerial(n){const d=new Date(Math.round((Math.floor(n)-25569)*86400000));return isNaN(d)?'':d.toISOString().slice(0,10)}
+function xParseDate(v){
+  if(v===''||v==null)return '';
+  if(typeof v==='number')return xSerial(v);
+  if(v instanceof Date)return isNaN(v)?'':v.toISOString().slice(0,10);
+  const s=String(v).trim();let m;
+  if((m=s.match(/^(\d{4})-(\d{2})-(\d{2})/)))return m[1]+'-'+m[2]+'-'+m[3];
+  if((m=s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/))){const y=m[3].length===2?'20'+m[3]:m[3];return y+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0')}
+  return '';
+}
+function xParseMes(v,fb){
+  if(v===''||v==null)return fb;
+  if(typeof v==='number')return xSerial(v).slice(0,7)||fb;
+  const s=String(v).trim();let m;
+  if((m=s.match(/^(\d{4})-(\d{2})/)))return m[1]+'-'+m[2];
+  if((m=s.match(/^(\d{1,2})[\/.\-](\d{4})$/)))return m[2]+'-'+m[1].padStart(2,'0');
+  const d=xParseDate(s);return d?d.slice(0,7):fb;
+}
+function xParseVal(v){
+  if(typeof v==='number')return v;
+  let s=String(v==null?'':v).replace(/R\$|\s/g,'').replace('−','-');if(!s)return NaN;
+  if(s.indexOf(',')>=0)s=s.replace(/\./g,'').replace(',','.');
+  return parseFloat(s);
+}
+const XL_COL={tipo:['tipo'],pt:['parte','parceiro','cliente','fornecedor','nome','clientefornecedor'],d:['descricao','historico','detalhe'],v:['valor','valorrs','total'],venc:['vencimento','venc','data','datadevencimento'],comp:['competencia','mes'],cat:['categoria'],cc:['centrodecusto','cc','centro'],forma:['forma','formadepagamento','pagamento'],st:['status','situacao'],pago:['pagoem','datadepagamento','datapagamento','datadorecebimento','recebidoem','datadabaixa'],conta:['conta','contabancaria','banco']};
+function xlPlan(rows){
+  const out={ok:[],dup:0,err:[],catFb:0,skipEx:0};
+  const catIdx=allCats().map(c=>[xnorm(c.nome),c.id]);
+  const ccs=centros(),ccDef=ccs.includes('Geral')?'Geral':ccs[0];
+  const contaIdx=CONTAS.map(c=>[xnorm(c.nome),c.id]);
+  const formaIdx=Object.keys(FORMAS).map(k=>[xnorm(FORMAS[k]),k]).concat(Object.keys(FORMAS).map(k=>[k,k]));
+  const have=new Set(LANC.filter(l=>l.k!=='t').map(l=>l.k+'|'+xnorm(l.pt)+'|'+l.v+'|'+l.venc));
+  rows.forEach((raw,i)=>{
+    const ln=i+2,r={};
+    Object.keys(XL_COL).forEach(f=>{r[f]='';for(const a of XL_COL[f]){const key=Object.keys(raw).find(k=>xnorm(k)===a);if(key!==undefined&&raw[key]!==''){r[f]=raw[key];break}}});
+    if(Object.keys(raw).every(k=>raw[k]===''))return;
+    if(String(r.pt).trim().toLowerCase().startsWith('(exemplo')){out.skipEx++;return}
+    const val=xParseVal(r.v);
+    if(!isFinite(val)||val===0){out.err.push('Linha '+ln+': valor ausente ou inválido.');return}
+    const t=xnorm(r.tipo);let k;
+    if(/^(rec|ent|cred|r$)/.test(t))k='r';else if(/^(pag|sai|des|deb|p$)/.test(t))k='p';else if(!t)k=val<0?'p':'r';
+    else if(/^transf/.test(t)){out.err.push('Linha '+ln+': transferências não são importadas por aqui.');return}
+    else{out.err.push('Linha '+ln+': Tipo "'+r.tipo+'" não reconhecido. Use Receber ou Pagar.');return}
+    const v=Math.round(Math.abs(val)*100);
+    const stT=xnorm(r.st);let pago=xParseDate(r.pago);
+    const isPaid=/^(pag|rec|quit|liq|baix|p$|r$)/.test(stT)||(!stT&&!!pago);
+    let venc=xParseDate(r.venc)||(isPaid?pago:'');
+    if(!venc){out.err.push('Linha '+ln+': vencimento ausente ou inválido.');return}
+    const comp=xParseMes(r.comp,venc.slice(0,7));
+    let cat=null;const cn=xnorm(r.cat);
+    if(cn){const e=catIdx.find(x=>x[0]===cn)||catIdx.find(x=>x[0].indexOf(cn)>=0||cn.indexOf(x[0])>=0);if(e)cat=e[1]}
+    if(!cat){cat=k==='r'?'outras-rec':'outras-des';out.catFb++}
+    const fo=formaIdx.find(x=>x[0]===xnorm(r.forma));
+    const doc={k,pt:String(r.pt).trim().slice(0,80),d:String(r.d).trim().slice(0,120),v,venc,comp,cat,cc:String(r.cc).trim()||ccDef,forma:fo?fo[1]:'nd',st:'a',pago:null,conta:null,grp:null,n:1,nn:1,rep:'unica',anexo:null};
+    if(isPaid){
+      if(!CONTAS.length){out.err.push('Linha '+ln+': cadastre uma conta antes de importar lançamentos pagos.');return}
+      if(!pago)pago=venc;
+      const cx=xnorm(r.conta);let c=cx?contaIdx.find(x=>x[0]===cx):null;
+      if(cx&&!c){out.err.push('Linha '+ln+': conta "'+r.conta+'" não existe. Cadastre-a em Ajustes ou corrija o nome.');return}
+      doc.st='p';doc.pago=pago;doc.conta=c?c[1]:CONTAS[0].id;
+    }
+    const key=k+'|'+xnorm(doc.pt)+'|'+v+'|'+venc;
+    if(have.has(key)){out.dup++;return}
+    out.ok.push(doc);
+  });
+  return out;
+}
+function xlImportFile(file){
+  if(!window.XLSX){toast('A biblioteca do Excel não carregou. Recarregue a página.');return}
+  if(!CAN||!DB){toast('Você não tem permissão para gravar.');return}
+  const fr=new FileReader();
+  fr.onerror=()=>toast('Não foi possível ler o arquivo.');
+  fr.onload=()=>{
+    let rows;
+    try{
+      const wb=XLSX.read(new Uint8Array(fr.result),{type:'array'});
+      const nm=wb.SheetNames.find(n=>xnorm(n)==='lancamentos')||wb.SheetNames[0];
+      rows=XLSX.utils.sheet_to_json(wb.Sheets[nm],{defval:'',raw:true});
+    }catch(e){toast('Arquivo inválido. Use .xlsx, .xls ou .csv.');return}
+    if(!rows.length){toast('A planilha está vazia.');return}
+    if(rows.length>5000){toast('Máximo de 5.000 linhas por importação.');return}
+    const p=xlPlan(rows);
+    const li=a=>a.length?'<ul class="note" style="margin:6px 0 0;padding-left:18px">'+a.slice(0,8).map(x=>'<li>'+esc(x)+'</li>').join('')+(a.length>8?'<li>e mais '+(a.length-8)+'.</li>':'')+'</ul>':'';
+    let h='<p><b>'+p.ok.length+'</b> '+(p.ok.length===1?'lançamento pronto':'lançamentos prontos')+' para importar.</p>';
+    if(p.dup)h+='<p class="note">'+p.dup+' já existiam na Mesa Financeira e serão ignorados.</p>';
+    if(p.catFb)h+='<p class="note">'+p.catFb+' sem categoria reconhecida, indo para "Outras receitas" ou "Outras despesas". Ajuste depois, se quiser.</p>';
+    if(p.err.length)h+='<p style="color:var(--out)"><b>'+p.err.length+'</b> '+(p.err.length===1?'linha com problema (não será importada):':'linhas com problema (não serão importadas):')+'</p>'+li(p.err);
+    h+='<div class="bar-a" style="margin-top:12px"><button type="button" class="pri" id="xl-go"'+(p.ok.length?'':' disabled')+'>Importar '+p.ok.length+'</button><button type="button" id="xl-no">Cancelar</button></div><p class="note" id="xl-prog"></p>';
+    openSheet('Importar do Excel',h,box=>{
+      box.querySelector('#xl-no').addEventListener('click',closeSheet);
+      box.querySelector('#xl-go').addEventListener('click',async e=>{
+        e.target.disabled=true;const pr=box.querySelector('#xl-prog');let n=0;
+        try{
+          for(let i=0;i<p.ok.length;i+=10){
+            await Promise.all(p.ok.slice(i,i+10).map(d=>DB.collection('lanc').doc().set(d)));
+            n=Math.min(p.ok.length,i+10);pr.textContent=n+' de '+p.ok.length+'…';
+          }
+          closeSheet();toast(p.ok.length+' lançamentos importados.');
+        }catch(x){pr.textContent='Parou após '+n+' lançamentos: '+errMsg(x);e.target.disabled=false}
+      });
+    });
+  };
+  fr.readAsArrayBuffer(file);
+}
+
 /* ---------- renderização geral ---------- */
 function renderBanner(){
   const b=[];
@@ -868,8 +1018,12 @@ function bind(){
     else if(id==='aj-cc-s'){const v=$('#aj-cc').value.trim();if(v&&!centros().includes(v))saveCfg({centros:centros().concat([v])})}
     else if(id==='aj-cat-s'){const v=$('#aj-cat').value.trim();if(v)saveCfg({cats:(CFG.cats||[]).concat([{id:'x'+rid(),nome:v,g:$('#aj-catg').value}])})}
     else if(id==='aj-csv')csvExport();
+    else if(id==='aj-xl')xlExport();
+    else if(id==='aj-xlm')xlModelo();
+    else if(id==='aj-xli'){const f=$('#aj-xlf');if(f){f.value='';f.click()}}
     else if(id==='aj-ex')removeEx();
   });
+  $('#v-ajustes').addEventListener('change',e=>{if(e.target.id==='aj-xlf'&&e.target.files[0])xlImportFile(e.target.files[0])});
 }
 
 

@@ -157,6 +157,8 @@ td.m,th.m{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabula
     <button role="tab" data-tab="receber" aria-selected="false">A receber</button>
     <button role="tab" data-tab="dfc" aria-selected="false">DFC</button>
     <button role="tab" data-tab="dre" aria-selected="false">DRE</button>
+    <button role="tab" data-tab="orcamento" aria-selected="false">Orçamento</button>
+    <button role="tab" data-tab="aprender" aria-selected="false">Aprenda</button>
     <button role="tab" data-tab="ajustes" aria-selected="false">Ajustes</button>
   </nav>
   <div id="banner" style="display:flex;flex-direction:column;gap:8px"></div>
@@ -237,6 +239,10 @@ td.m,th.m{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabula
     <div class="panel" id="dre-cats"></div>
   </section>
 
+  <section class="view" id="v-orcamento" hidden></section>
+
+  <section class="view" id="v-aprender" hidden></section>
+
   <section class="view" id="v-ajustes" hidden></section>
 
   <p class="foot">Gerencial, não substitui a escrituração contábil. Competência é o mês a que a receita ou o custo pertence; caixa é o mês em que o dinheiro entrou ou saiu.</p>
@@ -294,7 +300,7 @@ let DB=null,ASSETS=null,DL=null,CAN=true;
 let CONTAS=[],LANC=[],CFG={};
 const ready={c:false,l:false,g:false};
 let dbError='';
-const UI={tab:'fluxo',modo:'dia',hor:30,p:{st:'aberto',mes:'todos',q:''},r:{st:'aberto',mes:'todos',q:''},dper:'',dreg:'comp',dfcy:0};
+const UI={tab:'fluxo',modo:'dia',hor:30,p:{st:'aberto',mes:'todos',q:''},r:{st:'aberto',mes:'todos',q:''},dper:'',dreg:'comp',dfcy:0,budgetMonth:CUR,learnResult:null};
 let M={};
 
 const allCats=()=>CATS0.concat(CFG.cats||[]);
@@ -959,6 +965,27 @@ function xlImportFile(file){
   fr.readAsArrayBuffer(file);
 }
 
+/* ---------- Orçamento e educação financeira ---------- */
+function renderOrcamento(){
+  const month=UI.budgetMonth||CUR, budgets=CFG.budgets||{}; const b=budgets[month]||{};
+  const cats=allCats().filter(c=>DREG.includes(c.g));
+  const rows=cats.map(c=>{
+    const income=c.g==='rec';
+    const actual=LANC.filter(l=>l.k!=='t'&&(income?l.k==='r':l.k==='p')&&l.cat===c.id&&(l.comp||l.venc.slice(0,7))===month).reduce((a,l)=>a+(l.v||0),0);
+    const target=Number(b[c.id]||0); const ratio=target>0?actual/target:0; const over=target>0&&actual>target;
+    return {c,actual,target,ratio,over,income};
+  }).filter(x=>x.actual||x.target).sort((a,b)=>b.actual-a.actual);
+  const totalActual=rows.reduce((a,x)=>a+x.actual*(x.income?1:-1),0);
+  const totalTarget=rows.reduce((a,x)=>a+x.target*(x.income?1:-1),0);
+  $('#v-orcamento').innerHTML='<div class="panel"><h2>Orçamento mensal</h2><p class="note">Defina metas por categoria e compare com os lançamentos registrados no mês de competência. Os valores registrados não significam necessariamente que já foram pagos ou recebidos.</p><label class="f">Mês analisado<input type="month" id="bud-month" value="'+esc(month)+'"></label><div class="tiles"><div class="tile"><span class="lbl">Resultado orçado líquido*</span><span class="v">'+brl(totalTarget)+'</span></div><div class="tile"><span class="lbl">Resultado lançado líquido*</span><span class="v">'+brl(totalActual)+'</span></div></div><p class="tag">*Soma das metas e dos lançamentos das categorias exibidas. Configure as categorias abaixo para obter comparativos úteis.</p></div>'+
+  '<div class="panel"><h2>Metas por categoria</h2><p class="note">Informe a meta mensal em reais e salve. Categorias sem meta também podem aparecer se houver movimentação.</p><form id="bud-form"><div class="rows">'+cats.map(c=>{const actual=LANC.filter(l=>l.k!=='t'&&(c.g==='rec'?l.k==='r':l.k==='p')&&l.cat===c.id&&(l.comp||l.venc.slice(0,7))===month).reduce((a,l)=>a+(l.v||0),0);const target=Number(b[c.id]||0);const pct=target?Math.round(actual/target*100):null;return '<div class="row"><div class="r1"><div class="who"><b>'+esc(c.nome)+'</b><span class="meta">'+esc(GRUPOS[c.g])+' · Lançado: '+brl(actual)+'</span></div><div class="amt">'+(pct===null?'<span class="chip c-info">Sem meta</span>':'<span class="chip '+(pct>100&&c.g!=='rec'?'c-out':'c-info')+'">'+pct+'% da meta</span>')+'</div></div><label class="f">Meta mensal (R$)<input class="n bud-value" inputmode="decimal" data-cat="'+esc(c.id)+'" value="'+(target?money(target):'')+'" placeholder="0,00"></label></div>'}).join('')+'</div><div class="bar-a"><button class="pri" type="submit">Salvar orçamento</button><button type="button" id="bud-clear">Limpar metas deste mês</button></div><p class="tag" id="bud-msg" role="status"></p></form></div>'+
+  '<div class="panel"><h2>Como interpretar</h2><p class="note">Para despesas, um valor acima de 100% da meta sinaliza desvio que merece análise. Para receitas, ficar abaixo da meta pode indicar necessidade de rever vendas ou projeções. Metas são parâmetros definidos pelo usuário, não previsões garantidas.</p></div>';
+}
+function renderAprender(){
+ $('#v-aprender').innerHTML='<div class="panel"><h2>Aprenda com seus números</h2><p class="note">Conteúdo educativo para apoiar decisões. Os exemplos são ilustrativos e não substituem análise contábil, tributária ou de investimentos individualizada.</p><details class="d" open><summary>Caixa não é lucro</summary><p class="note">O caixa mostra dinheiro disponível e movimentações efetivas. O resultado por competência considera quando receitas e custos pertencem ao período, mesmo que o pagamento ocorra em outra data. Uma empresa pode ter lucro e enfrentar falta de caixa se vender a prazo ou acumular estoque.</p></details><details class="d"><summary>Como funciona a margem</summary><p class="note">A margem é o resultado dividido pela receita, multiplicado por 100. Confira se os custos, impostos, devoluções e despesas foram classificados corretamente antes de comparar períodos.</p></details><details class="d"><summary>Capital de giro</summary><p class="note">É o recurso necessário para financiar o intervalo entre pagar fornecedores e receber clientes, além de manter a operação. Prazos de recebimento, estoque, fornecedores e sazonalidade influenciam a necessidade.</p></details><details class="d"><summary>Organização financeira pessoal</summary><p class="note">Registre renda líquida, despesas essenciais, despesas variáveis, parcelas e dívidas. Planeje metas realistas e mantenha uma reserva compatível com suas despesas e estabilidade de renda.</p></details></div>'+
+ '<div class="panel"><h2>Simulador de meta de poupança</h2><p class="note">Estime o aporte mensal necessário para atingir uma meta sem considerar rendimentos. É uma conta simples, não uma promessa de retorno.</p><form id="learn-form" class="g2"><label class="f">Valor da meta (R$)<input id="learn-goal" class="n" inputmode="decimal" value="10000" required></label><label class="f">Valor já guardado (R$)<input id="learn-saved" class="n" inputmode="decimal" value="1000" required></label><label class="f full">Prazo (meses)<input id="learn-months" type="number" min="1" max="600" value="12" required></label><div class="bar-a full"><button class="pri" type="submit">Calcular aporte</button></div></form><div id="learn-result" aria-live="polite">Informe os valores e calcule para ver o resultado.</div></div>'+
+ '<div class="panel"><h2>Boas práticas</h2><ul><li>Revise lançamentos sem categoria e datas provisórias.</li><li>Concilie o saldo calculado com o extrato bancário.</li><li>Não conte transferências entre contas como receita ou despesa.</li><li>Separe dados confirmados de estimativas e cenários.</li><li>Faça o fechamento mensal e registre as explicações para variações relevantes.</li></ul></div>';
+}
 /* ---------- renderização geral ---------- */
 function renderBanner(){
   const b=[];
@@ -976,12 +1003,12 @@ function renderBanner(){
 function render(){
   build();renderBanner();
   const t=UI.tab;
-  if(t==='fluxo')renderFluxo();else if(t==='pagar')renderLista('p');else if(t==='receber')renderLista('r');else if(t==='dfc')renderDfc();else if(t==='dre')renderDre();else if(t==='ajustes')renderAjustes();
+  if(t==='fluxo')renderFluxo();else if(t==='pagar')renderLista('p');else if(t==='receber')renderLista('r');else if(t==='dfc')renderDfc();else if(t==='dre')renderDre();else if(t==='orcamento')renderOrcamento();else if(t==='aprender')renderAprender();else if(t==='ajustes')renderAjustes();
 }
 function setTab(t,push){
   UI.tab=t;
   document.querySelectorAll('.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t?'true':'false'));
-  ['fluxo','pagar','receber','dfc','dre','ajustes'].forEach(v=>{$('#v-'+v).hidden=v!==t});
+  ['fluxo','pagar','receber','dfc','dre','orcamento','aprender','ajustes'].forEach(v=>{$('#v-'+v).hidden=v!==t});
   if(push){try{history.replaceState(null,'','#'+t)}catch(e){}}
   render();
 }
@@ -1012,6 +1039,10 @@ function bind(){
   $('#dfc-ano').addEventListener('change',e=>{UI.dfcy=+e.target.value;renderDfc()});
   $('#dre-per').addEventListener('change',e=>{UI.dper=e.target.value;renderDre()});
   document.querySelectorAll('input[name=dreg]').forEach(r=>r.addEventListener('change',()=>{UI.dreg=r.value;renderDre()}));
+  $('#v-orcamento').addEventListener('change',e=>{if(e.target.id==='bud-month'){UI.budgetMonth=e.target.value||CUR;renderOrcamento()}});
+  $('#v-orcamento').addEventListener('submit',async e=>{if(e.target.id!=='bud-form')return;e.preventDefault();if(!CAN||!DB){toast('Entre com permissão de edição para salvar.');return}const month=UI.budgetMonth||CUR;const budgets=Object.assign({},CFG.budgets||{});const values={};e.target.querySelectorAll('.bud-value').forEach(inp=>{const v=cents(inp.value);if(v>0)values[inp.dataset.cat]=v});budgets[month]=values;const btn=e.target.querySelector('button[type=submit]');btn.disabled=true;try{await saveCfg({budgets});$('#bud-msg').textContent='Orçamento enviado para salvar.'}finally{btn.disabled=false}});
+  $('#v-orcamento').addEventListener('click',async e=>{if(e.target.id!=='bud-clear')return;if(!CAN||!DB){toast('Entre com permissão de edição para salvar.');return}const budgets=Object.assign({},CFG.budgets||{});delete budgets[UI.budgetMonth||CUR];await saveCfg({budgets})});
+  $('#v-aprender').addEventListener('submit',e=>{if(e.target.id!=='learn-form')return;e.preventDefault();const goal=cents($('#learn-goal').value),saved=cents($('#learn-saved').value),months=Math.max(1,Math.min(600,Number($('#learn-months').value)||1));const remaining=Math.max(0,goal-saved);$('#learn-result').innerHTML='<div class="hero '+(remaining===0?'pos':'')+'"><span class="lbl">Aporte mensal estimado</span><span class="big">'+brl(Math.ceil(remaining/months))+'</span><span class="sub">Faltam '+brl(remaining)+' em '+months+' meses, sem considerar rendimentos, taxas ou inflação.</span></div>'});
   $('#v-ajustes').addEventListener('click',e=>{
     const id=e.target.id;
     if(id==='aj-emp-s')saveCfg({empresa:$('#aj-emp').value.trim()});

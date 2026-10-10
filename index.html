@@ -503,7 +503,10 @@ $('#pw').addEventListener('submit',async e=>{
 $('#lg').addEventListener('submit',async e=>{
   e.preventDefault();if(!sb)return;msg('');
   const r=await sb.auth.signInWithPassword(cred());
-  if(r.error)return msg('E-mail ou senha inválidos.');
+  if(r.error){
+    const t=r.error.message||'';
+    return msg(/invalid login/i.test(t)?'E-mail ou senha inválidos.':/not confirmed/i.test(t)?'Este e-mail ainda não foi confirmado. Confirme pelo link recebido ou peça ao administrador.':r.error.status===429?'Muitas tentativas. Aguarde alguns minutos.':'Não foi possível entrar: '+t);
+  }
   entrar(r.data.user);
 });
 $('#lg-new').addEventListener('click',async()=>{

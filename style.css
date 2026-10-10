@@ -132,3 +132,5 @@ svg.ch{display:block;width:100%;height:auto}
 .lk{min-height:0;padding:0;border:0;background:none;color:var(--ac);font:inherit;font-weight:600;text-decoration:underline}
 .lk:hover{background:none}
 input[type=file]{padding:9px 10px;font-size:13px}
+
+.sm{min-height:38px;padding:6px 14px}

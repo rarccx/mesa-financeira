@@ -6,11 +6,13 @@
 <title>Mesa Financeira</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
 </head>
 <body>
 <div class="w">
   <header>
-    <h1>Mesa Financeira</h1>
+    <div class="top"><h1>Mesa Financeira</h1><div class="usr"><span id="who" class="cap"></span><button id="sair" hidden>Sair</button></div></div>
     <div class="sw" role="group" aria-label="Módulo">
       <button data-m="pf" aria-pressed="true">Pessoa física</button>
       <button data-m="pj" aria-pressed="false">Pessoa jurídica</button>
@@ -20,11 +22,24 @@
     <button data-v="p" aria-pressed="true">Painel</button>
     <button data-v="l" aria-pressed="false">Lançamentos</button>
   </nav>
+  <p id="aviso" class="neg" role="alert" hidden></p>
   <main id="app" class="w"></main>
   <footer class="ft">
-    <span>Controle gerencial, não substitui a contabilidade. Os dados ficam salvos neste navegador.</span>
+    <span>Controle gerencial, não substitui a contabilidade. Seus dados ficam salvos na sua conta.</span>
     <button data-a="clr">Apagar dados</button>
   </footer>
+</div>
+
+<div id="gate" class="gate">
+  <form id="lg" class="pn">
+    <h1>Mesa Financeira</h1>
+    <label class="f">E-mail<input id="lg-em" type="email" autocomplete="username" required></label>
+    <label class="f">Senha<input id="lg-pw" type="password" autocomplete="current-password" required minlength="8"></label>
+    <p id="lg-msg" class="cap" role="alert"></p>
+    <button class="pri" type="submit">Entrar</button>
+    <button type="button" id="lg-new">Criar conta</button>
+    <button type="button" id="lg-fg" class="gh">Esqueci minha senha</button>
+  </form>
 </div>
 
 <script>
@@ -65,9 +80,16 @@ const cat=(m,id)=>CFG[m].c.find(x=>x[0]===id)||[id,'Outros','des'];
 /* ---------- estado ---------- */
 const K='mesa-financeira-v2';
 let S={m:'pf',v:'p',mes:ym(new Date()),pf:{l:[],cx:0},pj:{l:[],cx:0}};
-try{Object.assign(S,JSON.parse(localStorage.getItem(K)||'{}'))}catch(e){}
 S.mes=ym(new Date());
-const save=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}};
+const CF=window.MF_CONFIG||{};
+const sb=window.supabase&&CF.SB_URL&&CF.SB_KEY?window.supabase.createClient(CF.SB_URL,CF.SB_KEY):null;
+let USER=null,tm;
+const aviso=t=>{const a=$('#aviso');a.textContent=t||'';a.hidden=!t};
+const save=()=>{clearTimeout(tm);tm=setTimeout(async()=>{
+  if(!sb||!USER)return;
+  const r=await sb.from('mesa_dados').upsert({user_id:USER.id,dados:{pf:S.pf,pj:S.pj},atualizado_em:new Date().toISOString()});
+  aviso(r.error?'Não foi possível salvar agora. Verifique sua conexão e tente de novo.':'');
+},400)};
 
 function agg(m,mes){
   const o={bc:{}};Object.keys(CFG[m].g).forEach(g=>o[g]=0);
@@ -235,6 +257,7 @@ document.addEventListener('click',e=>{
   save();render();
 });
 document.addEventListener('submit',e=>{
+  if(e.target.id!=='fm')return;
   e.preventDefault();
   const f=e.target,v=val(f.v.value);
   if(v<=0){$('#er').hidden=false;return}
@@ -244,7 +267,57 @@ document.addEventListener('submit',e=>{
 document.addEventListener('change',e=>{
   if(e.target.id==='cx'){S[S.m].cx=val(e.target.value);save();render()}
 });
-render();
+
+/* ---------- login e logoff ---------- */
+const msg=t=>{$('#lg-msg').textContent=t||''};
+const cred=()=>({email:$('#lg-em').value.trim(),password:$('#lg-pw').value});
+async function entrar(user){
+  USER=user;
+  const r=await sb.from('mesa_dados').select('dados').eq('user_id',user.id).maybeSingle();
+  if(r.error){msg('Não foi possível carregar seus dados. Confira se o arquivo supabase.sql foi executado.');return}
+  const d=(r.data&&r.data.dados)||{};
+  S.pf=d.pf||{l:[],cx:0};S.pj=d.pj||{l:[],cx:0};S.v='p';S.mes=ym(new Date());
+  $('#who').textContent=user.email;$('#sair').hidden=false;$('#gate').hidden=true;
+  $('#lg-pw').value='';msg('');render();
+}
+$('#lg').addEventListener('submit',async e=>{
+  e.preventDefault();if(!sb)return;msg('');
+  const r=await sb.auth.signInWithPassword(cred());
+  if(r.error)return msg('E-mail ou senha inválidos.');
+  entrar(r.data.user);
+});
+$('#lg-new').addEventListener('click',async()=>{
+  if(!sb)return;const c=cred();
+  if(!c.email||c.password.length<8)return msg('Informe um e-mail e uma senha com pelo menos 8 caracteres.');
+  const r=await sb.auth.signUp(c);
+  if(r.error)return msg('Não foi possível criar a conta: '+r.error.message);
+  if(r.data.session)entrar(r.data.user);else msg('Conta criada. Confirme o e-mail que enviamos e depois clique em Entrar.');
+});
+$('#lg-fg').addEventListener('click',async()=>{
+  if(!sb)return;const em=$('#lg-em').value.trim();
+  if(!em)return msg('Digite seu e-mail acima.');
+  await sb.auth.resetPasswordForEmail(em,{redirectTo:location.origin+location.pathname});
+  msg('Se esse e-mail tiver conta, enviamos o link para redefinir a senha.');
+});
+$('#sair').addEventListener('click',async()=>{
+  clearTimeout(tm);await sb.auth.signOut();USER=null;
+  S.pf={l:[],cx:0};S.pj={l:[],cx:0};
+  $('#app').innerHTML='';$('#who').textContent='';$('#sair').hidden=true;aviso('');
+  $('#gate').hidden=false;$('#lg-pw').value='';
+});
+async function novaSenha(){
+  const n=prompt('Digite sua nova senha (mínimo de 8 caracteres):');
+  if(!n)return;
+  if(n.length<8)return alert('A senha precisa ter pelo menos 8 caracteres.');
+  const r=await sb.auth.updateUser({password:n});
+  alert(r.error?'Não foi possível trocar a senha. Peça um novo link.':'Senha alterada com sucesso.');
+}
+(async function boot(){
+  if(!sb){msg('Falta configurar o Supabase: preencha SB_URL e SB_KEY no arquivo config.js.');return}
+  sb.auth.onAuthStateChange(ev=>{if(ev==='PASSWORD_RECOVERY')setTimeout(novaSenha,0)});
+  const r=await sb.auth.getSession();
+  if(r.data.session)entrar(r.data.session.user);
+})();
 </script>
 </body>
 </html>

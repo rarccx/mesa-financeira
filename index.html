@@ -291,7 +291,7 @@ $('#lg-new').addEventListener('click',async()=>{
   if(!sb)return;const c=cred();
   if(!c.email||c.password.length<8)return msg('Informe um e-mail e uma senha com pelo menos 8 caracteres.');
   const r=await sb.auth.signUp(c);
-  if(r.error)return msg('Não foi possível criar a conta: '+r.error.message);
+  if(r.error)return msg(/not allowed/i.test(r.error.message)?'O cadastro aberto está desativado. Peça um convite ao administrador do sistema.':'Não foi possível criar a conta: '+r.error.message);
   if(r.data.session)entrar(r.data.user);else msg('Conta criada. Confirme o e-mail que enviamos e depois clique em Entrar.');
 });
 $('#lg-fg').addEventListener('click',async()=>{

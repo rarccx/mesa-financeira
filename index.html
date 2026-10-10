@@ -81,6 +81,7 @@ const cat=(m,id)=>CFG[m].c.find(x=>x[0]===id)||[id,'Outros','des'];
 const K='mesa-financeira-v2';
 let S={m:'pf',v:'p',mes:ym(new Date()),pf:{l:[],cx:0},pj:{l:[],cx:0}};
 S.mes=ym(new Date());
+const INVITE=/type=invite/.test(location.hash);
 const CF=window.MF_CONFIG||{};
 const sb=window.supabase&&CF.SB_URL&&CF.SB_KEY?window.supabase.createClient(CF.SB_URL,CF.SB_KEY):null;
 let USER=null,tm;
@@ -316,7 +317,7 @@ async function novaSenha(){
   if(!sb){msg('Falta configurar o Supabase: preencha SB_URL e SB_KEY no arquivo config.js.');return}
   sb.auth.onAuthStateChange(ev=>{if(ev==='PASSWORD_RECOVERY')setTimeout(novaSenha,0)});
   const r=await sb.auth.getSession();
-  if(r.data.session)entrar(r.data.session.user);
+  if(r.data.session){await entrar(r.data.session.user);if(INVITE)novaSenha()}
 })();
 </script>
 </body>

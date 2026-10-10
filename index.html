@@ -12,11 +12,8 @@
 <body>
 <div class="w">
   <header>
-    <div class="top"><h1>Mesa Financeira</h1><div class="usr"><span id="who" class="cap"></span><button id="sair" hidden>Sair</button></div></div>
-    <div class="sw" role="group" aria-label="Módulo">
-      <button data-m="pf" aria-pressed="true">Pessoa física</button>
-      <button data-m="pj" aria-pressed="false">Pessoa jurídica</button>
-    </div>
+    <div class="top"><h1>Mesa Financeira</h1><div class="usr"><span id="who" class="cap"></span><button id="amb" hidden>Trocar ambiente</button><button id="sair" hidden>Sair</button></div></div>
+    <p id="envn" class="envn"></p>
   </header>
   <nav class="nv" aria-label="Seções">
     <button data-v="p" aria-pressed="true">Painel</button>
@@ -27,7 +24,7 @@
   <p id="aviso" class="neg" role="alert" hidden></p>
   <main id="app" class="w"></main>
   <footer class="ft">
-    <span>Controle gerencial, não substitui a contabilidade. Seus dados ficam salvos na sua conta.</span>
+    <span>Controle gerencial, não substitui a contabilidade. Seus dados ficam salvos na sua conta, criptografados com a senha de cada ambiente.</span>
     <button data-a="clr">Apagar dados</button>
   </footer>
 </div>
@@ -42,6 +39,23 @@
     <button class="pri" type="submit">Entrar</button>
     <button type="button" id="lg-new">Criar conta</button>
     <button type="button" id="lg-fg" class="gh">Esqueci minha senha</button>
+  </form>
+  <section id="ev" class="pn" hidden>
+    <h1>Escolha o ambiente</h1>
+    <p class="cap">Cada ambiente tem a própria senha e os próprios dados.</p>
+    <button type="button" class="envb" data-env="pf"><b>Pessoa física</b><small id="ev-pf"></small></button>
+    <button type="button" class="envb" data-env="pj"><b>Pessoa jurídica</b><small id="ev-pj"></small></button>
+    <button type="button" class="gh" id="ev-out">Sair da conta</button>
+  </section>
+  <form id="pw" class="pn" hidden>
+    <h1 id="pw-t"></h1>
+    <p class="cap" id="pw-d"></p>
+    <label class="f">Senha do ambiente<input id="pw-1" type="password" autocomplete="off" required minlength="8"></label>
+    <label class="f" id="pw-2l">Repita a senha<input id="pw-2" type="password" autocomplete="off"></label>
+    <label class="chk" id="pw-ck"><input type="checkbox" id="pw-c"><span>Entendo que, se eu esquecer esta senha, os dados deste ambiente não poderão ser recuperados.</span></label>
+    <p id="pw-msg" class="neg" role="alert"></p>
+    <button class="pri" type="submit" id="pw-ok"></button>
+    <button type="button" class="gh" id="pw-back">Voltar</button>
   </form>
   <form id="np" class="pn" hidden>
     <h1>Defina sua senha</h1>
@@ -100,11 +114,35 @@ const CF=window.MF_CONFIG||{};
 const sb=window.supabase&&CF.SB_URL&&CF.SB_KEY?window.supabase.createClient(CF.SB_URL,CF.SB_KEY):null;
 let USER=null,tm;
 const aviso=t=>{const a=$('#aviso');a.textContent=t||'';a.hidden=!t};
-const save=()=>{AC={};clearTimeout(tm);tm=setTimeout(async()=>{
-  if(!sb||!USER)return;
-  const r=await sb.from('mesa_dados').upsert({user_id:USER.id,dados:{pf:S.pf,pj:S.pj},atualizado_em:new Date().toISOString()});
+let RAW={},KEY={},ENV='';
+const te=new TextEncoder(),td=new TextDecoder(),KDF=600000;
+const b64=u=>{const a=new Uint8Array(u);let x='';for(let i=0;i<a.length;i+=8192)x+=String.fromCharCode.apply(null,a.subarray(i,i+8192));return btoa(x)};
+const unb=t=>Uint8Array.from(atob(t),c=>c.charCodeAt(0));
+async function derive(pw,salt,it){
+  const k=await crypto.subtle.importKey('raw',te.encode(pw),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:it,hash:'SHA-256'},k,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+async function encrypt(m){
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},KEY[m].k,te.encode(JSON.stringify(S[m])));
+  return{enc:1,it:KEY[m].it,salt:KEY[m].salt,iv:b64(iv),ct:b64(ct)};
+}
+async function decrypt(blob,pw){
+  const k=await derive(pw,unb(blob.salt),blob.it);
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:unb(blob.iv)},k,unb(blob.ct));
+  return{k,data:JSON.parse(td.decode(pt))};
+}
+async function persist(m){
+  if(!sb||!USER||!KEY[m])return false;
+  const blob=await encrypt(m);
+  const cur=await sb.from('mesa_dados').select('dados').eq('user_id',USER.id).maybeSingle();
+  if(cur.error){aviso('Não foi possível salvar agora. Verifique sua conexão e tente de novo.');return false}
+  RAW=Object.assign({},cur.data&&cur.data.dados,{[m]:blob});
+  const r=await sb.from('mesa_dados').upsert({user_id:USER.id,dados:RAW,atualizado_em:new Date().toISOString()});
   aviso(r.error?'Não foi possível salvar agora. Verifique sua conexão e tente de novo.':'');
-},400)};
+  return !r.error;
+}
+const save=()=>{AC={};clearTimeout(tm);tm=setTimeout(()=>persist(S.m),400)};
 
 let AC={};
 const agg=(m,mes)=>AC[m+mes]||(AC[m+mes]=agg0(m,mes));
@@ -351,6 +389,7 @@ let rq;
 const render=()=>{cancelAnimationFrame(rq);rq=requestAnimationFrame(draw)};
 function draw(){
   document.documentElement.dataset.mod=S.m;
+  $('#envn').textContent='Ambiente: '+CFG[S.m].nome;
   document.querySelectorAll('[data-m]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.m===S.m));
   document.querySelectorAll('[data-v]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.v===S.v));
   $('#app').innerHTML=S.v==='p'?painel():S.v==='b'?bancoV():S.v==='c'?contasV():lanc();
@@ -409,11 +448,58 @@ async function entrar(user){
   USER=user;AC={};
   const r=await sb.from('mesa_dados').select('dados').eq('user_id',user.id).maybeSingle();
   if(r.error){msg('Não foi possível carregar seus dados. Confira se o arquivo supabase.sql foi executado.');return}
-  const d=(r.data&&r.data.dados)||{};
-  S.pf=mig(d.pf||{l:[],cx:0});S.pj=mig(d.pj||{l:[],cx:0});S.v='p';S.mes=ym(new Date());
-  $('#who').textContent=user.email;$('#sair').hidden=false;$('#gate').hidden=true;
-  $('#lg-pw').value='';msg('');render();
+  RAW=(r.data&&r.data.dados)||{};
+  $('#who').textContent=user.email;$('#lg-pw').value='';msg('');
+  escolher();
 }
+function escolher(){
+  ['pf','pj'].forEach(m=>{const b=RAW[m];$('#ev-'+m).textContent=b&&b.enc?'Protegido por senha':b&&b.l?'Dados sem proteção. Toque para criar a senha':'Novo ambiente. Toque para criar a senha'});
+  ['lg','np','pw'].forEach(x=>$('#'+x).hidden=true);
+  $('#ev').hidden=false;$('#gate').hidden=false;$('#amb').hidden=true;$('#sair').hidden=true;$('#app').innerHTML='';
+}
+function abrirPw(m){
+  ENV=m;const b=RAW[m],has=!!(b&&b.enc),nm=CFG[m].nome;
+  document.documentElement.dataset.mod=m;
+  $('#pw-t').textContent=(has?'Abrir ':'Criar senha: ')+nm;
+  $('#pw-d').textContent=has?'Digite a senha deste ambiente. Ela é diferente da senha de login.':(b&&b.l?'Seus dados atuais deste ambiente serão criptografados com esta senha. ':'')+'Os dados são embaralhados no seu navegador antes de serem salvos. Esta senha é diferente da senha de login.';
+  $('#pw-2l').hidden=$('#pw-ck').hidden=has;$('#pw-2').required=!has;$('#pw-c').checked=false;
+  $('#pw-ok').textContent=has?'Abrir ambiente':'Criar senha e abrir';
+  $('#pw-msg').textContent='';$('#ev').hidden=true;$('#pw').hidden=false;$('#pw-1').focus();
+}
+function entrarAmb(m){
+  S.m=m;S.v='p';S.mes=ym(new Date());AC={};
+  $('#gate').hidden=true;$('#pw').hidden=true;$('#sair').hidden=false;$('#amb').hidden=false;render();
+}
+async function trancar(){
+  const m=S.m;clearTimeout(tm);
+  if(KEY[m]&&!(await persist(m)))return false;
+  KEY[m]=null;S[m]={l:[],cx:0,bks:[]};AC={};$('#app').innerHTML='';return true;
+}
+$('#ev').addEventListener('click',e=>{const b=e.target.closest('[data-env]');if(b)abrirPw(b.dataset.env)});
+$('#ev-out').addEventListener('click',()=>$('#sair').click());
+$('#pw-back').addEventListener('click',()=>{$('#pw').hidden=true;$('#ev').hidden=false});
+$('#amb').addEventListener('click',async()=>{if(await trancar())escolher()});
+$('#pw').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const m=ENV,b=RAW[m],pw=$('#pw-1').value,ok=$('#pw-ok');
+  $('#pw-msg').textContent='';ok.disabled=true;
+  try{
+    if(b&&b.enc){
+      let x;try{x=await decrypt(b,pw)}catch(_){throw 'Senha incorreta.'}
+      KEY[m]={k:x.k,salt:b.salt,it:b.it};S[m]=mig(x.data);
+    }else{
+      if(pw.length<8)throw 'Use pelo menos 8 caracteres.';
+      if(pw!==$('#pw-2').value)throw 'As senhas não conferem.';
+      if(!$('#pw-c').checked)throw 'Marque a confirmação para continuar.';
+      const salt=crypto.getRandomValues(new Uint8Array(16));
+      KEY[m]={k:await derive(pw,salt,KDF),salt:b64(salt),it:KDF};
+      S[m]=mig(b&&b.l?b:{l:[],cx:0});
+      if(!(await persist(m))){KEY[m]=null;throw 'Não foi possível salvar. Tente de novo.'}
+    }
+    entrarAmb(m);
+  }catch(err){$('#pw-msg').textContent=typeof err==='string'?err:'Não foi possível abrir o ambiente neste navegador.'}
+  finally{ok.disabled=false;$('#pw-1').value='';$('#pw-2').value=''}
+});
 $('#lg').addEventListener('submit',async e=>{
   e.preventDefault();if(!sb)return;msg('');
   const r=await sb.auth.signInWithPassword(cred());
@@ -434,10 +520,11 @@ $('#lg-fg').addEventListener('click',async()=>{
   msg('Se esse e-mail tiver conta, enviamos o link para redefinir a senha.');
 });
 $('#sair').addEventListener('click',async()=>{
-  clearTimeout(tm);await sb.auth.signOut();USER=null;
-  S.pf={l:[],cx:0};S.pj={l:[],cx:0};
-  $('#app').innerHTML='';$('#who').textContent='';$('#sair').hidden=true;aviso('');
-  $('#gate').hidden=false;$('#lg-pw').value='';
+  if(KEY[S.m]&&!(await trancar()))return;
+  await sb.auth.signOut();USER=null;RAW={};KEY={};
+  S.pf={l:[],cx:0,bks:[]};S.pj={l:[],cx:0,bks:[]};
+  $('#app').innerHTML='';$('#who').textContent='';$('#sair').hidden=true;$('#amb').hidden=true;aviso('');
+  ['ev','pw','np'].forEach(x=>$('#'+x).hidden=true);$('#lg').hidden=false;$('#gate').hidden=false;$('#lg-pw').value='';
 });
 const needPw=u=>SETPW||(u.invited_at&&!(u.user_metadata&&u.user_metadata.senha_definida));
 function defSenha(u){USER=u;$('#lg').hidden=true;$('#np').hidden=false;$('#gate').hidden=false;$('#np-1').focus()}

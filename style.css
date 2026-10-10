@@ -134,3 +134,5 @@ svg.ch{display:block;width:100%;height:auto}
 input[type=file]{padding:9px 10px;font-size:13px}
 
 .sm{min-height:38px;padding:6px 14px}
+
+.neg-b{color:var(--out);border-color:var(--out)}

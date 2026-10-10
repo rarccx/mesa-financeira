@@ -237,12 +237,21 @@ function painel(){
   <section class="pn"><h2>Últimos 6 meses</h2>${hist(m)}</section>`;
 }
 
-const banco=m=>{
-  const b=S[m].bk;if(!b||!b.d)return null;
-  let a=b.saldo,f=0;const t=today();
-  S[m].l.forEach(l=>{const d=l.pg||l.d;if(l.st!=='a'&&d<b.d)return;const x=isIn(cat(m,l.c)[2])?l.v:-l.v;if(l.st!=='a'&&d<=t)a+=x;else f+=x});
-  return{atual:a,proj:a+f};
-};
+const bancos=m=>S[m].bks||[];
+const mig=x=>{if(!x.bks){x.bks=x.bk?[{id:'b0',nome:'Conta principal',saldo:x.bk.saldo,d:x.bk.d}]:[];delete x.bk}return x};
+function banco(m){
+  const bs=bancos(m),t=today();if(!bs.length)return null;
+  const c={};bs.forEach(b=>c[b.id]={b,atual:b.saldo,proj:0});
+  S[m].l.forEach(l=>{
+    const k=c[l.b]||c[bs[0].id],d=l.pg||l.d;
+    if(l.st!=='a'&&d<k.b.d)return;
+    const x=isIn(cat(m,l.c)[2])?l.v:-l.v;
+    if(l.st!=='a'&&d<=t)k.atual+=x;else k.proj+=x;
+  });
+  const L=Object.values(c);let A=0,P=0;
+  L.forEach(k=>{k.proj+=k.atual;A+=k.atual;P+=k.proj});
+  return{atual:A,proj:P,contas:L};
+}
 const addD=(d,n)=>{const x=new Date(+d.slice(0,4),+d.slice(5,7)-1,+d.slice(8)+n);return ym(x)+'-'+p2(x.getDate())};
 function venc(m,B){
   const t=today(),t7=addD(t,7),o=[];let ap=0,vp=0,ar=0,vr=0,p7=0,r7=0;
@@ -273,31 +282,46 @@ function contasV(){
   ${blk(m==='pf'?'A pagar':'Contas a pagar',P,false)}${blk(m==='pf'?'A receber':'Contas a receber',R,true)}`;
 }
 function bancoV(){
-  const m=S.m,b=S[m].bk||{saldo:0,d:''},B=banco(m);let ext='';
+  const m=S.m,bs=bancos(m),B=banco(m),t=today();
+  const ed=bs.find(b=>b.id===S.be),sel=bs.find(b=>b.id===S.bx);
+  const acc=l=>bs.find(b=>b.id===l.b)||bs[0];
+  const fd=d=>d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+  let ext='';
   if(B){
-    let run=b.saldo;
-    const R=S[m].l.filter(l=>l.st!=='a'&&(l.pg||l.d)>=b.d&&(l.pg||l.d)<=today()).sort((x,y)=>(x.pg||x.d).localeCompare(y.pg||y.d)).map(l=>{
-      const g=isIn(cat(m,l.c)[2]);run+=g?l.v:-l.v;
-      return`<li><div><b>${E(l.desc)}</b><small>${(l.pg||l.d).slice(8)}/${(l.pg||l.d).slice(5,7)}/${(l.pg||l.d).slice(0,4)} · ${E(cat(m,l.c)[1])}</small></div><span class="v ${g?'pos':''}">${g?'+':'−'}${brl(l.v)}</span><span class="cap">${brl(run)}</span></li>`});
+    let run=sel?sel.saldo:0;
+    const R=S[m].l.filter(l=>{const d=l.pg||l.d;return l.st!=='a'&&d<=t&&d>=acc(l).d&&(!sel||acc(l)===sel)})
+      .sort((x,y)=>(x.pg||x.d).localeCompare(y.pg||y.d)).map(l=>{
+        const g=isIn(cat(m,l.c)[2]);run+=g?l.v:-l.v;
+        return`<li><div><b>${E(l.desc)}</b><small>${fd(l.pg||l.d)} · ${E(cat(m,l.c)[1])}${!sel&&bs.length>1?' · '+E(acc(l).nome):''}</small></div><span class="v ${g?'pos':''}">${g?'+':'−'}${brl(l.v)}</span><span class="cap">${sel?brl(run):''}</span></li>`});
     ext=R.length?`<ul class="ls">${R.reverse().slice(0,40).join('')}</ul>`:'<p class="cap">Nenhuma movimentação desde a data do saldo inicial.</p>';
   }
-  return`<section class="pn hero"><p class="cap">Saldo no banco hoje</p><p class="big">${B?brl(B.atual):'—'}</p><p class="cap">${B?'Projetado com os lançamentos futuros: '+brl(B.proj):'Informe o saldo para começar'}</p></section>
-  <form class="pn g" id="bk"><label class="f">Saldo inicial (R$)<input name="s" required inputmode="decimal" placeholder="0,00" value="${B?(b.saldo/100).toFixed(2).replace('.',','):''}"></label><label class="f">Na data<input name="d" type="date" required value="${b.d||today()}"></label><p class="cap full">Entradas a partir dessa data somam ao saldo e saídas descontam. Lançamentos com data futura entram só na projeção.</p><button class="pri full" type="submit">Salvar saldo</button></form>
-  <section class="pn"><h2>Extrato</h2>${ext}</section>`;
+  const contas=B?B.contas.map(k=>`<li><div><b>${E(k.b.nome)}</b><small>Saldo inicial ${brl(k.b.saldo)} em ${fd(k.b.d)}</small></div><span class="v">${brl(k.atual)}</span><button class="gh" data-a="eb" data-id="${k.b.id}">Editar</button></li>`).join(''):'';
+  return`<section class="pn hero"><p class="cap">${bs.length>1?'Saldo somado dos bancos hoje':'Saldo no banco hoje'}</p><p class="big">${B?brl(B.atual):'—'}</p><p class="cap">${B?'Projetado com os lançamentos futuros: '+brl(B.proj):'Adicione uma conta para começar'}</p></section>
+  ${B?`<section class="pn"><h2>Contas</h2><ul class="ls">${contas}</ul></section>`:''}
+  <form class="pn g" id="bkf"><h2 class="full">${ed?'Editar conta':bs.length?'Adicionar outra conta':'Adicionar conta'}</h2>
+    <label class="f full">Nome do banco ou conta<input name="nome" required maxlength="40" placeholder="Ex.: Nubank, Itaú PJ, Caixa" value="${ed?E(ed.nome):''}"></label>
+    <label class="f">Saldo inicial (R$)<input name="s" required inputmode="decimal" placeholder="0,00" value="${ed?(ed.saldo/100).toFixed(2).replace('.',','):''}"></label>
+    <label class="f">Na data<input name="d" type="date" required value="${ed?ed.d:t}"></label>
+    <p class="cap full">Entradas a partir dessa data somam ao saldo e saídas descontam. Lançamentos de datas futuras e contas em aberto entram só na projeção.</p>
+    <button class="pri full" type="submit">${ed?'Salvar alterações':'Adicionar conta'}</button>
+    ${ed?`<button type="button" data-a="cb">Cancelar</button><button type="button" class="neg-b" data-a="db" data-id="${ed.id}">Excluir conta</button>`:''}
+  </form>
+  <section class="pn"><h2>Extrato</h2>${bs.length>1?`<div style="margin-bottom:12px"><label class="f">Conta<select id="bxs"><option value="">Todas as contas</option>${bs.map(b=>`<option value="${b.id}"${b.id===S.bx?' selected':''}>${E(b.nome)}</option>`).join('')}</select></label></div>`:''}${ext}</section>`;
 }
 
 function lanc(){
-  const m=S.m,C=CFG[m];
+  const m=S.m,C=CFG[m],bs=bancos(m);
   const opts=Object.keys(C.g).map(g=>`<optgroup label="${C.g[g]}">${C.c.filter(c=>c[2]===g).map(c=>`<option value="${c[0]}">${c[1]}</option>`).join('')}</optgroup>`).join('');
   const L=S[m].l.filter(l=>l.d.startsWith(S.mes)).sort((x,y)=>y.d.localeCompare(x.d));
   const dflt=S.mes===ym(new Date())?today():S.mes+'-01';
-  const rows=L.length?`<ul class="ls">${L.map(l=>{const g=cat(m,l.c)[2];return`<li><div><b>${E(l.desc)}</b><small>${E(cat(m,l.c)[1])} · ${l.d.slice(8)}/${l.d.slice(5,7)}${l.st==='a'?' · em aberto':''} · ${l.a?`<button class="lk" data-a="ver" data-p="${E(l.a.p)}">Ver comprovante</button>`:`<button class="lk" data-a="att" data-id="${l.id}">Anexar comprovante</button>`}</small></div><span class="v ${isIn(g)?'pos':''}">${isIn(g)?'+':'−'}${brl(l.v)}</span><button class="gh" data-a="del" data-id="${l.id}" aria-label="Excluir ${E(l.desc)}">Excluir</button></li>`}).join('')}</ul>`:'<p class="cap">Nenhum lançamento em '+ml(S.mes)+'. Use o formulário acima para adicionar o primeiro.</p>';
+  const rows=L.length?`<ul class="ls">${L.map(l=>{const g=cat(m,l.c)[2];return`<li><div><b>${E(l.desc)}</b><small>${E(cat(m,l.c)[1])} · ${l.d.slice(8)}/${l.d.slice(5,7)}${l.st==='a'?' · em aberto':''}${bancos(m).length>1?' · '+E((bancos(m).find(b=>b.id===l.b)||bancos(m)[0]).nome):''} · ${l.a?`<button class="lk" data-a="ver" data-p="${E(l.a.p)}">Ver comprovante</button>`:`<button class="lk" data-a="att" data-id="${l.id}">Anexar comprovante</button>`}</small></div><span class="v ${isIn(g)?'pos':''}">${isIn(g)?'+':'−'}${brl(l.v)}</span><button class="gh" data-a="del" data-id="${l.id}" aria-label="Excluir ${E(l.desc)}">Excluir</button></li>`}).join('')}</ul>`:'<p class="cap">Nenhum lançamento em '+ml(S.mes)+'. Use o formulário acima para adicionar o primeiro.</p>';
   return mon()+`
   <form class="pn g" id="fm">
     <label class="f full">Descrição<input name="desc" required maxlength="80" placeholder="${m==='pf'?'Ex.: Mercado da semana':'Ex.: Venda para cliente'}"></label>
     <label class="f">Valor (R$)<input name="v" required inputmode="decimal" placeholder="1.250,00"></label>
     <label class="f">Data (vencimento, se em aberto)<input name="d" type="date" required value="${dflt}"></label>
     <label class="f full">Categoria<select name="c">${opts}</select></label>
+    ${bs.length>1?`<label class="f full">Conta bancária<select name="conta">${bs.map(b=>`<option value="${b.id}">${E(b.nome)}</option>`).join('')}</select></label>`:''}
     <label class="f full">Situação<select name="st"><option value="p">Já foi pago ou recebido</option><option value="a">Em aberto (a pagar ou a receber)</option></select></label>
     <label class="f full">Comprovante (opcional)<input name="arq" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg"></label>
     <p class="neg full" id="er" role="alert" hidden>Digite um valor maior que zero, por exemplo 1.250,00.</p>
@@ -313,12 +337,14 @@ function demo(){
   }[m];
   [-2,-1,0].forEach(i=>P.forEach((x,k)=>{
     const f=['sal','ven','ser','alu','fol'].includes(x[0])?1:1+(((k+i*3)%5+5)%5-2)*.04;
-    S[m].l.push({id:uid(),c:x[0],desc:cat(m,x[0])[1],v:Math.round(x[1]*f)*100,d:sh(S.mes,i)+'-'+p2(x[2])});
+    S[m].l.push({id:uid(),c:x[0],desc:cat(m,x[0])[1],v:Math.round(x[1]*f)*100,d:sh(S.mes,i)+'-'+p2(x[2]),b:k%4===3?'b2':'b1'});
   }));
   ({pf:[['con',320,3,'Conta de luz'],['mor',1800,-2,'Aluguel'],['ext',500,5,'Freela a receber']],
     pj:[['alu',3200,2,'Aluguel da loja'],['fol',10200,-1,'Folha de pagamento'],['ven',8500,-3,'Cliente Alfa'],['ser',4200,6,'Cliente Beta']]}[m]).forEach(x=>
     S[m].l.push({id:uid(),c:x[0],desc:x[3],v:x[1]*100,d:addD(today(),x[2]),st:'a'}));
-  if(!S[m].bk)S[m].bk={saldo:m==='pf'?850000:2000000,d:sh(S.mes,-2)+'-01'};
+  if(!bancos(m).length){const d0=sh(S.mes,-2)+'-01';
+    S[m].bks=m==='pf'?[{id:'b1',nome:'Conta corrente',saldo:850000,d:d0},{id:'b2',nome:'Poupança',saldo:1200000,d:d0}]
+                      :[{id:'b1',nome:'Banco principal',saldo:2000000,d:d0},{id:'b2',nome:'Conta digital',saldo:600000,d:d0}]}
 }
 
 let rq;
@@ -341,25 +367,34 @@ document.addEventListener('click',e=>{
   else if(a==='go')S.v='l';
   else if(a==='demo')demo();
   else if(a==='pay'){const x=S[S.m].l.find(l=>l.id===D.id);if(x){x.st='p';x.pg=today()}}
+  else if(a==='eb')S.be=D.id;
+  else if(a==='cb')S.be='';
+  else if(a==='db'){if(!confirm('Excluir esta conta? Os lançamentos dela passam para a primeira conta da lista.'))return;S[S.m].bks=bancos(S.m).filter(b=>b.id!==D.id);S.be='';S.bx=''}
   else if(a==='ver'){abrir(D.p);return}
   else if(a==='att'){$('#fi').dataset.id=D.id;$('#fi').click();return}
   else if(a==='del'){const x=S[S.m].l.find(l=>l.id===D.id);if(x&&x.a&&sb)sb.storage.from('comprovantes').remove([x.a.p]);S[S.m].l=S[S.m].l.filter(l=>l.id!==D.id)}
-  else if(a==='clr'){if(!confirm('Apagar todos os dados de '+CFG[S.m].nome+'? Esta ação não pode ser desfeita.'))return;S[S.m]={l:[],cx:0}}
+  else if(a==='clr'){if(!confirm('Apagar todos os dados de '+CFG[S.m].nome+'? Esta ação não pode ser desfeita.'))return;S[S.m]={l:[],cx:0,bks:[]}}
   save();render();
 });
 document.addEventListener('submit',async e=>{
   const f=e.target;
-  if(f.id==='bk'){e.preventDefault();S[S.m].bk={saldo:val(f.s.value),d:f.d.value};save();render();return}
+  if(f.id==='bkf'){
+    e.preventDefault();
+    const o={nome:f.nome.value.trim(),saldo:val(f.s.value),d:f.d.value},bs=S[S.m].bks=S[S.m].bks||[],b=bs.find(x=>x.id===S.be);
+    if(b)Object.assign(b,o);else bs.push(Object.assign({id:uid()},o));
+    S.be='';save();render();return;
+  }
   if(f.id!=='fm')return;
   e.preventDefault();
   const v=val(f.v.value);
   if(v<=0){$('#er').hidden=false;return}
   let a=null;
   if(f.arq.files[0]){a=await subir(f.arq.files[0]);if(!a)return}
-  S[S.m].l.push({id:uid(),desc:f.desc.value.trim(),v,c:f.c.value,d:f.d.value,st:f.st.value,a});
+  S[S.m].l.push({id:uid(),desc:f.desc.value.trim(),v,c:f.c.value,d:f.d.value,st:f.st.value,b:f.conta?f.conta.value:undefined,a});
   S.mes=f.d.value.slice(0,7);save();render();
 });
 document.addEventListener('change',async e=>{
+  if(e.target.id==='bxs'){S.bx=e.target.value;render();return}
   if(e.target.id!=='fi')return;
   const file=e.target.files[0],id=e.target.dataset.id;e.target.value='';
   if(!file)return;
@@ -375,7 +410,7 @@ async function entrar(user){
   const r=await sb.from('mesa_dados').select('dados').eq('user_id',user.id).maybeSingle();
   if(r.error){msg('Não foi possível carregar seus dados. Confira se o arquivo supabase.sql foi executado.');return}
   const d=(r.data&&r.data.dados)||{};
-  S.pf=d.pf||{l:[],cx:0};S.pj=d.pj||{l:[],cx:0};S.v='p';S.mes=ym(new Date());
+  S.pf=mig(d.pf||{l:[],cx:0});S.pj=mig(d.pj||{l:[],cx:0});S.v='p';S.mes=ym(new Date());
   $('#who').textContent=user.email;$('#sair').hidden=false;$('#gate').hidden=true;
   $('#lg-pw').value='';msg('');render();
 }

@@ -43,6 +43,14 @@
     <button type="button" id="lg-new">Criar conta</button>
     <button type="button" id="lg-fg" class="gh">Esqueci minha senha</button>
   </form>
+  <form id="np" class="pn" hidden>
+    <h1>Defina sua senha</h1>
+    <p class="cap">Escolha a senha que você vai usar para entrar nas próximas vezes.</p>
+    <label class="f">Nova senha<input id="np-1" type="password" autocomplete="new-password" required minlength="8"></label>
+    <label class="f">Repita a senha<input id="np-2" type="password" autocomplete="new-password" required minlength="8"></label>
+    <p id="np-msg" class="neg" role="alert"></p>
+    <button class="pri" type="submit">Salvar senha</button>
+  </form>
 </div>
 
 <script>
@@ -85,7 +93,9 @@ const cat=(m,id)=>CFG[m].c.find(x=>x[0]===id)||[id,'Outros','des'];
 const K='mesa-financeira-v2';
 let S={m:'pf',v:'p',mes:ym(new Date()),pf:{l:[],cx:0},pj:{l:[],cx:0}};
 S.mes=ym(new Date());
-const INVITE=/type=invite/.test(location.hash);
+const _h=new URLSearchParams((location.hash||'').slice(1));
+const SETPW=['invite','recovery'].includes(_h.get('type'));
+const AUTH_ERR=_h.get('error_description')||'';
 const CF=window.MF_CONFIG||{};
 const sb=window.supabase&&CF.SB_URL&&CF.SB_KEY?window.supabase.createClient(CF.SB_URL,CF.SB_KEY):null;
 let USER=null,tm;
@@ -394,18 +404,24 @@ $('#sair').addEventListener('click',async()=>{
   $('#app').innerHTML='';$('#who').textContent='';$('#sair').hidden=true;aviso('');
   $('#gate').hidden=false;$('#lg-pw').value='';
 });
-async function novaSenha(){
-  const n=prompt('Digite sua nova senha (mínimo de 8 caracteres):');
-  if(!n)return;
-  if(n.length<8)return alert('A senha precisa ter pelo menos 8 caracteres.');
-  const r=await sb.auth.updateUser({password:n});
-  alert(r.error?'Não foi possível trocar a senha. Peça um novo link.':'Senha alterada com sucesso.');
-}
+const needPw=u=>SETPW||(u.invited_at&&!(u.user_metadata&&u.user_metadata.senha_definida));
+function defSenha(u){USER=u;$('#lg').hidden=true;$('#np').hidden=false;$('#gate').hidden=false;$('#np-1').focus()}
+$('#np').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const a=$('#np-1').value,b=$('#np-2').value,m=$('#np-msg');
+  if(a.length<8){m.textContent='Use pelo menos 8 caracteres.';return}
+  if(a!==b){m.textContent='As senhas não conferem.';return}
+  const r=await sb.auth.updateUser({password:a,data:{senha_definida:true}});
+  if(r.error){m.textContent='Não foi possível salvar a senha. Peça um novo convite ou use "Esqueci minha senha".';return}
+  m.textContent='';$('#np').hidden=true;$('#lg').hidden=false;
+  history.replaceState(null,'',location.pathname+location.search);
+  entrar(USER);
+});
 (async function boot(){
   if(!sb){msg('Falta configurar o Supabase: preencha SB_URL e SB_KEY no arquivo config.js.');return}
-  sb.auth.onAuthStateChange(ev=>{if(ev==='PASSWORD_RECOVERY')setTimeout(novaSenha,0)});
+  if(AUTH_ERR){msg('Este link expirou ou já foi usado. Peça um novo convite ou use "Esqueci minha senha".');history.replaceState(null,'',location.pathname+location.search)}
   const r=await sb.auth.getSession();
-  if(r.data.session){await entrar(r.data.session.user);if(INVITE)novaSenha()}
+  if(r.data.session){const u=r.data.session.user;needPw(u)?defSenha(u):entrar(u)}
 })();
 </script>
 </body>
